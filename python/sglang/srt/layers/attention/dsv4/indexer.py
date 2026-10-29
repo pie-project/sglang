@@ -103,9 +103,9 @@ def fp8_paged_mqa_logits_torch(
     assert clean_logits == False
 
     max_num_pages = page_table.shape[1]
-    # Prefill rows: bound the per-row gather/bmm temporaries to ~512 MiB per chunk
-    row_bytes = max_num_pages * block_size * (4 * head_dim + 8 + 4 * num_heads)
-    rows_per_chunk = max(1, (512 << 20) // max(1, row_bytes))
+    # Prefill rows: bound the per-row gather/bmm temporaries to ~128 MiB per chunk
+    row_bytes = max_num_pages * block_size * (4 * head_dim + 8 + 12 * num_heads)
+    rows_per_chunk = max(1, (128 << 20) // max(1, row_bytes))
     if batch_size > rows_per_chunk:
         return torch.cat(
             [
