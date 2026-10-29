@@ -940,6 +940,18 @@ class IndexerKPool(MultiPlatformOp):
                 )
             return logits
 
+        if torch.cuda.get_device_capability(q_fp8.device)[0] < 9:
+            from sglang.srt.layers.attention.dsa.utils import _fp8_mqa_logits_torch
+
+            logits = _fp8_mqa_logits_torch(
+                q_fp8, (k_fp8, k_scale), weights, starts, ends
+            )
+            if clean_logits:
+                pos = torch.arange(logits.shape[1], device=logits.device)
+                logits.masked_fill_(
+                    (pos < starts[:, None]) | (pos >= ends[:, None]), float("-inf")
+                )
+            return logits
         return deep_gemm.fp8_mqa_logits(
             q_fp8, (k_fp8, k_scale), weights, starts, ends, clean_logits=clean_logits
         )
@@ -951,7 +963,7 @@ class IndexerKPool(MultiPlatformOp):
             return False
         arch_major, _ = torch.cuda.get_device_capability(q_fp8.device)
         num_heads = q_fp8.shape[1]
-        return arch_major == 9 and num_heads not in (32, 64)
+        return arch_major < 9 or (arch_major == 9 and num_heads not in (32, 64))
 
     def _get_topk_paged(
         self,
