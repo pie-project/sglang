@@ -1919,7 +1919,8 @@ class QwenSparseAttnBackend(AttentionBackend):
             batch,
             topk,
         )
-        if is_hip():
+        # the FA4 cute Sm80 path fails to launch on sm8x (CUDA_LAUNCH_INVALID_CONFIG)
+        if is_hip() or torch.cuda.get_device_capability(q.device)[0] < 9:
             relative_indices = torch.arange(
                 topk, dtype=torch.int32, device=q.device
             ).expand(batch, -1)
