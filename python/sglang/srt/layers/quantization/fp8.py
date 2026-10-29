@@ -255,6 +255,9 @@ def cast_e2m1fn_to_e4m3fn(
 class Fp8Config(QuantizationConfig):
     """Config class for FP8."""
 
+    # Routed experts in compressed-tensors NVFP4 beside the FP8 projections.
+    nvfp4_experts = False
+
     def __init__(
         self,
         is_checkpoint_fp8_serialized: bool = False,
@@ -369,7 +372,7 @@ class Fp8Config(QuantizationConfig):
                     weight_block_size,
                 )
             weight_block_size = [1, 32]
-        return cls(
+        quant_config = cls(
             is_checkpoint_fp8_serialized=is_checkpoint_fp8_serialized,
             activation_scheme=activation_scheme,
             ignored_layers=ignored_layers,
@@ -379,6 +382,11 @@ class Fp8Config(QuantizationConfig):
             kv_cache_quant_algo=kv_cache_quant_algo,
             scale_fmt=scale_fmt,
         )
+        quant_config.nvfp4_experts = (
+            str(config.get("moe_quant_algo", "")).upper() == "NVFP4"
+            and config.get("moe_quant_format") == "nvfp4-pack-quantized"
+        )
+        return quant_config
 
     def get_quant_method(
         self, layer: torch.nn.Module, prefix: str
@@ -406,6 +414,18 @@ class Fp8Config(QuantizationConfig):
                 return UnquantizedFusedMoEMethod(
                     layer.use_triton_kernels, layer.use_flashinfer_trtllm_moe
                 )
+
+            if self.nvfp4_experts:
+                # Weight-only FP4 Marlin: loads the checkpoint's NVFP4 experts as is.
+                from sglang.srt.layers.quantization.compressed_tensors.compressed_tensors import (
+                    CompressedTensorsFusedMoEMethod,
+                )
+                from sglang.srt.layers.quantization.compressed_tensors.schemes import (
+                    CompressedTensorsW4A16Nvfp4MoE,
+                )
+
+                layer.scheme = CompressedTensorsW4A16Nvfp4MoE(has_input_global_scale=True)
+                return CompressedTensorsFusedMoEMethod(self)
 
             if is_npu() and self.use_mxfp8:
                 from sglang.srt.hardware_backend.npu.quantization.online_moe_methods import (
