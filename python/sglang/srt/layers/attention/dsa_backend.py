@@ -331,6 +331,50 @@ def _cat(tensors: list[torch.Tensor], dim: int = -1) -> torch.Tensor:
     return _compiled_cat([qk_nope, qk_rope], dim=dim)
 
 
+def _sparse_mla_fwd_pre_sm90(
+    q_all: torch.Tensor,
+    kv_cache: torch.Tensor,
+    indices: torch.Tensor,
+    sm_scale: float,
+    d_v: int,
+    attn_sink: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Sparse MLA below SM90, where FlashMLA and FA3 have no kernels.
+
+    indices: [tokens, topk] KV slot ids, -1 for unused entries.
+    """
+    heads = q_all.shape[1]
+    rope_dim = q_all.shape[-1] - d_v
+    if attn_sink is None and rope_dim > 0 and heads >= 16 and heads & (heads - 1) == 0:
+        from sglang.kernels.ops.attention.dsa.triton_sparse_mla import (
+            triton_sparse_mla_fwd,
+        )
+
+        return triton_sparse_mla_fwd(
+            q_all[..., :d_v],
+            q_all[..., d_v:],
+            kv_cache,
+            indices.unsqueeze(1),
+            sm_scale,
+            d_v,
+        ).squeeze(0)
+    kv = kv_cache.view(kv_cache.shape[0], -1)
+    topk = indices.shape[-1]
+    out = q_all.new_empty(q_all.shape[0], heads, d_v)
+    chunk = max(1, (1 << 27) // max(1, topk * kv.shape[-1]))
+    for s in range(0, q_all.shape[0], chunk):
+        idx = indices[s : s + chunk]
+        g = kv[idx.clamp(min=0).long()]
+        scores = torch.matmul(q_all[s : s + chunk], g.transpose(1, 2)).float()
+        scores = (scores * sm_scale).masked_fill((idx < 0)[:, None, :], float("-inf"))
+        if attn_sink is not None:
+            sink = attn_sink.float()[None, :, None].expand(scores.shape[0], -1, 1)
+            scores = torch.cat([scores, sink], dim=-1)
+        p = torch.softmax(scores, dim=-1).nan_to_num_(0.0)[..., :topk]
+        out[s : s + chunk] = torch.matmul(p.to(g.dtype), g[..., :d_v])
+    return out
+
+
 _DSA_IMPL_T: TypeAlias = Literal[
     "flashmla_sparse",
     "flashmla_sparse_q8",
@@ -658,6 +702,10 @@ class DeepseekSparseAttnBackend(
         else:
             self.device_capability = torch.cuda.get_device_capability()
         self.device_sm_major = self.device_capability[0]
+        if self.device_sm_major < 9 and self.dsa_index_topk != 2048:
+            # The sgl-kernel top-k kernels only take topk=2048.
+            self.use_fused_topk = False
+            self.dsa_topk_backend = DSATopKBackend.TORCH
         self.kv_cache_dtype = model_runner.kv_cache_dtype
 
         # Unsupported flashmla_sparse_q8 configs must fail at launch, not mid-forward.
@@ -2707,6 +2755,15 @@ class DeepseekSparseAttnBackend(
                 cache_seqlens = cache_seqlens[:num_queries]
                 cu_seqlens_q = cu_seqlens_q[: num_queries + 1]
                 cu_seqlens_k = cu_seqlens_k[: num_queries + 1]
+        if self.device_sm_major < 9 and max_seqlen_q == 1:
+            pos = torch.arange(page_table.shape[1], device=page_table.device)
+            indices = page_table.masked_fill(
+                pos[None, :] >= cache_seqlens[: page_table.shape[0], None], -1
+            )
+            q_all = q_nope if q_rope is None else torch.cat([q_nope, q_rope], dim=-1)
+            return _sparse_mla_fwd_pre_sm90(
+                q_all, kv_cache, indices, sm_scale, v_head_dim
+            )
         k_rope_cache = kv_cache[:, :, v_head_dim:]
         c_kv_cache = kv_cache[:, :, :v_head_dim]
         qk_rope_dim = k_rope_cache.shape[-1]
@@ -2748,6 +2805,10 @@ class DeepseekSparseAttnBackend(
         topk_length: Optional[torch.Tensor] = None,
         attn_sink: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if self.device_sm_major < 9:
+            return _sparse_mla_fwd_pre_sm90(
+                q_all, kv_cache, page_table_1, sm_scale, v_head_dim, attn_sink
+            )
         from sgl_kernel.flash_mla import flash_mla_sparse_fwd
 
         # FlashMLA sparse kernel requires num_heads to be a multiple of 64 (Hopper) or 128 (Blackwell)

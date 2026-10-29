@@ -73,7 +73,7 @@ class DeepseekSparseAttnBackendKPoolMixin:
             return dsa_impl
         if self.device_sm_major >= 10:
             return "trtllm"
-        if self.device_sm_major == 9:
+        if self.device_sm_major <= 9:
             return "fa3"
         return dsa_impl
 
@@ -81,6 +81,8 @@ class DeepseekSparseAttnBackendKPoolMixin:
         return self.token_to_kv_pool.index_page_size
 
     def _build_kpool_paged_mqa_schedule_metadata(self) -> bool:
+        if self.device_sm_major < 9:
+            return False
         if self.device_sm_major == 9:
             return self.num_q_heads in (32, 64)
         return True
