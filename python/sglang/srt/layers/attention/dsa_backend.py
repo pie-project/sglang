@@ -702,7 +702,7 @@ class DeepseekSparseAttnBackend(
         else:
             self.device_capability = torch.cuda.get_device_capability()
         self.device_sm_major = self.device_capability[0]
-        if self.device_sm_major < 9 and self.dsa_index_topk != 2048:
+        if (self.device_sm_major < 9 or self.device_sm_major == 12) and self.dsa_index_topk != 2048:
             # The sgl-kernel top-k kernels only take topk=2048.
             self.use_fused_topk = False
             self.dsa_topk_backend = DSATopKBackend.TORCH
