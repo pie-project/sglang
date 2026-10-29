@@ -15,6 +15,8 @@ from typing import Iterable, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
+import triton
+import triton.language as tl
 from torch import nn
 
 from sglang.srt.configs.muse_spark import (
@@ -48,6 +50,73 @@ from sglang.srt.utils import add_prefix
 logger = logging.getLogger(__name__)
 
 _EXPERT_SHARD_IDS = {"gate_proj": "w1", "up_proj": "w3", "down_proj": "w2"}
+_MIN_TOKENS_FOR_FUSED = 32
+
+
+@triton.jit
+def _post_expert_norm_weighted_sum_kernel(
+    x_ptr,
+    w_ptr,
+    s_ptr,
+    out_ptr,
+    ids_ptr,
+    TOPK: tl.constexpr,
+    H: tl.constexpr,
+    eps,
+    HAS_IDS: tl.constexpr,
+    BLOCK_H: tl.constexpr,
+):
+    tok = tl.program_id(0)
+    offs = tl.arange(0, BLOCK_H)
+    mask = offs < H
+    w = tl.load(w_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+    acc = tl.zeros([BLOCK_H], dtype=tl.float32)
+    for k in tl.static_range(TOPK):
+        live = True
+        if HAS_IDS:
+            live = tl.load(ids_ptr + tok * TOPK + k) >= 0
+        if live:
+            x = tl.load(x_ptr + (tok * TOPK + k) * H + offs, mask=mask, other=0.0)
+            y = x.to(tl.float32) * w
+            y = y * tl.rsqrt(tl.sum(y * y, axis=0) / H + eps)
+            acc += y * tl.load(s_ptr + tok * TOPK + k).to(tl.float32)
+    tl.store(out_ptr + tok * H + offs, acc.to(out_ptr.dtype.element_ty), mask=mask)
+
+
+def fused_post_expert_norm_weighted_sum(
+    expert_output: torch.Tensor,
+    topk_scores: torch.Tensor,
+    norm_weight: torch.Tensor,
+    eps: float,
+    slot_expert_ids: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """``sum_k score_k * rms_norm(weight * x_k)`` over ``[T, top_k, H]`` outputs."""
+    x = expert_output.contiguous()
+    tokens, topk, hidden = x.shape
+    if tokens < _MIN_TOKENS_FOR_FUSED:
+        y = x.float() * norm_weight.float()
+        y = y * torch.rsqrt(y.pow(2).mean(-1, keepdim=True) + eps)
+        scores = topk_scores.float()
+        if slot_expert_ids is not None:
+            scores = torch.where(slot_expert_ids >= 0, scores, 0.0)
+        return (y * scores.unsqueeze(-1)).sum(dim=1).to(x.dtype)
+    out = torch.empty((tokens, hidden), dtype=x.dtype, device=x.device)
+    block_h = triton.next_power_of_2(hidden)
+    _post_expert_norm_weighted_sum_kernel[(tokens,)](
+        x,
+        norm_weight.contiguous(),
+        topk_scores.contiguous(),
+        out,
+        slot_expert_ids if slot_expert_ids is not None else x,
+        TOPK=topk,
+        H=hidden,
+        eps=eps,
+        HAS_IDS=slot_expert_ids is not None,
+        BLOCK_H=block_h,
+        num_warps=8 if block_h >= 4096 else 4,
+        num_stages=2,
+    )
+    return out
 
 
 class MuseSpark1xRMSNorm(nn.Module):
@@ -406,9 +475,17 @@ class MuseSpark1xExperts(nn.Module):
             moe_runner_config=self.runner_config,
         )
         # Muse norms each expert output before the weighted top-k sum.
-        normed = post_expert_norm(expert_output.float())
-        weights = torch.where(is_local, topk_scores.float(), 0.0).unsqueeze(-1)
-        return (normed * weights).sum(dim=1).to(hidden_states.dtype)
+        return fused_post_expert_norm_weighted_sum(
+            expert_output,
+            topk_scores.float(),
+            norm_weight=post_expert_norm.effective_weight().to(torch.bfloat16),
+            eps=float(post_expert_norm.eps),
+            slot_expert_ids=(
+                None
+                if self.num_local_experts == self.num_experts
+                else torch.where(is_local, local_ids, -1).contiguous()
+            ),
+        ).to(hidden_states.dtype)
 
 
 class MuseSpark1xMoE(nn.Module):
