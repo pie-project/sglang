@@ -2117,6 +2117,8 @@ class Fp8MoEMethod(FusedMoEMethodBase):
                     scale_param.data = torch.stack(new_scales).float()
                     scale_param.format_ue8m0 = False
                 self.is_fp4_expert = False
+                # cast_e2m1fn_to_e4m3fn emits 128x128 block scales
+                self.weight_block_size = [128, 128]
                 logger.warning_once("Dequantized FP4 expert weights to FP8.")
 
             if self.is_fp4_expert:
