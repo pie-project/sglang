@@ -328,7 +328,7 @@ class Fp8Config(QuantizationConfig):
         if self.use_mxfp8 and _is_hip and _is_gfx95_supported:
             return 95
         if self.use_mxfp8 and _mxfp8_to_block_fp8_required:
-            return 94
+            return 89 if _is_cuda else 94
 
         return 100 if self.use_mxfp8 else 80
 
