@@ -223,11 +223,11 @@ def _get_quantization_config(
 
             quant_config.is_dsv4_fp4_experts = is_deepseek_v4(model_config.hf_config)
             quant_config.dequant_fp4_to_fp8 = envs.SGLANG_DSV4_FP4_DEQUANT.get()
-            # sm8x has no MXFP4 MoE kernel on the FP8 path: run the experts as block FP8
+            # sm8x and sm_120 have no MXFP4 MoE kernel on the FP8 path: run the experts as block FP8
             if (
                 quant_config.is_fp4_experts
                 and current_platform.is_cuda()
-                and get_device_capability()[0] < 9
+                and (get_device_capability()[0] < 9 or (get_device_capability()[0] == 12 and not quant_config.is_dsv4_fp4_experts))
                 and get_moe_runner_backend().is_auto()
             ):
                 quant_config.dequant_fp4_to_fp8 = True
