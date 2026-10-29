@@ -1058,9 +1058,16 @@ class DefaultModelLoader(BaseModelLoader):
         )
         is_mxfp8 = quant_config is not None and quant_config.get_name() == "mxfp8"
         if is_mxfp8:
+            # NVFP4 routed experts keep their compressed-tensors weight_scale name.
+            nvfp4_experts = getattr(quant_config, "nvfp4_experts", False)
             weights = (
                 (
-                    f"{name}_inv" if name.endswith(".weight_scale") else name,
+                    (
+                        f"{name}_inv"
+                        if name.endswith(".weight_scale")
+                        and not (nvfp4_experts and ".experts." in name)
+                        else name
+                    ),
                     loaded_weight,
                 )
                 for name, loaded_weight in weights
