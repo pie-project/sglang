@@ -995,13 +995,8 @@ class SWARequestCapPoolConfigurator(HybridSWAPoolConfigurator):
                 int((available_bytes - fixed_swa_bytes) // full_cell_size) // page_size
             ) * page_size
         if full_tokens <= 0:
-            raise RuntimeError(
-                f"SWA pool cap ({swa_tokens} tokens, "
-                f"{fixed_swa_bytes / (1 << 30):.2f} GiB) leaves no room for the full "
-                f"KV pool within the available {available_bytes / (1 << 30):.2f} GiB. "
-                f"Reduce --max-running-requests, lower SGLANG_SWA_EVICTION_INTERVAL, "
-                f"or increase --mem-fraction-static."
-            )
+            # the worst-case cap does not fit beside any full pool: size both by swa_full_tokens_ratio
+            return super().calculate_pool_sizes(available_bytes, page_size)
         return self._make_pool_config(full_tokens, swa_tokens)
 
     def calculate_pool_sizes_from_max_tokens(
