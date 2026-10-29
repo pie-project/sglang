@@ -85,6 +85,7 @@ from sglang.srt.distributed import (
 from sglang.srt.layers.layer_boundary.stage import check_stage_producers
 from sglang.srt.layers.modelopt_utils import QUANT_CFG_CHOICES
 from sglang.srt.layers.moe.utils import (
+    get_moe_runner_backend,
     install_shared_experts_fusion_decision,
 )
 from sglang.srt.layers.quantization.base_config import (
@@ -222,6 +223,14 @@ def _get_quantization_config(
 
             quant_config.is_dsv4_fp4_experts = is_deepseek_v4(model_config.hf_config)
             quant_config.dequant_fp4_to_fp8 = envs.SGLANG_DSV4_FP4_DEQUANT.get()
+            # sm8x has no MXFP4 MoE kernel on the FP8 path: run the experts as block FP8
+            if (
+                quant_config.is_fp4_experts
+                and current_platform.is_cuda()
+                and get_device_capability()[0] < 9
+                and get_moe_runner_backend().is_auto()
+            ):
+                quant_config.dequant_fp4_to_fp8 = True
             # Handle hybrid NVFP4 moe (nvidia/DeepSeek-V4-Pro-NVFP4)
             nvfp4_meta = model_config.nvfp4_moe_meta
             if nvfp4_meta is not None:
