@@ -103,6 +103,25 @@ def fp8_paged_mqa_logits_torch(
     assert clean_logits == False
 
     max_num_pages = page_table.shape[1]
+    # Prefill rows: bound the per-row gather/bmm temporaries to ~512 MiB per chunk
+    row_bytes = max_num_pages * block_size * (4 * head_dim + 8 + 4 * num_heads)
+    rows_per_chunk = max(1, (512 << 20) // max(1, row_bytes))
+    if batch_size > rows_per_chunk:
+        return torch.cat(
+            [
+                fp8_paged_mqa_logits_torch(
+                    q_fp8[s : s + rows_per_chunk],
+                    kvcache_fp8,
+                    weight[s : s + rows_per_chunk],
+                    seq_lens[s : s + rows_per_chunk],
+                    page_table[s : s + rows_per_chunk],
+                    deep_gemm_metadata,
+                    max_seq_len,
+                    clean_logits,
+                )
+                for s in range(0, batch_size, rows_per_chunk)
+            ]
+        )
     SCALE_OFFSET = block_size * head_dim
     total_dim = block_size * (head_dim + 4)
 
