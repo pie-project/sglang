@@ -349,18 +349,8 @@ def fp8_mqa_logits_make_fused_kv(
     return fused.view(num_phys_blocks, block_kv, 1, per_token_size)
 
 
-@lru_cache(maxsize=1)
-def _is_cuda_pre_sm90() -> bool:
-    # DeepGEMM's paged MQA logits kernels need SM90+.
-    return (
-        torch.version.cuda is not None
-        and torch.cuda.is_available()
-        and torch.cuda.get_device_capability()[0] < 9
-    )
-
-
 def _use_torch_mqa_logits() -> bool:
-    return envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.get() or _is_cuda_pre_sm90()
+    return envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.get()
 
 
 @lru_cache(maxsize=1)
