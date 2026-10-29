@@ -322,6 +322,9 @@ def _apply_attn_sink(
     return (out.float() * w.unsqueeze(-1)).to(torch.bfloat16), combined_lse
 
 
+_PREFILL_CHUNK_TOKENS = 256
+
+
 def flash_mla_sparse_decode_triton(
     q: torch.Tensor,
     k_cache: torch.Tensor,
@@ -341,6 +344,27 @@ def flash_mla_sparse_decode_triton(
     """
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
+
+    # Prefill batches: chunk the tokens, the fp32 merge temporaries scale with tokens * heads * 512
+    if q.shape[0] > _PREFILL_CHUNK_TOKENS:
+        outs, lses = [], []
+        for s in range(0, q.shape[0], _PREFILL_CHUNK_TOKENS):
+            e = s + _PREFILL_CHUNK_TOKENS
+            o, l = flash_mla_sparse_decode_triton(
+                q[s:e],
+                k_cache,
+                indices[s:e],
+                None if topk_length is None else topk_length[s:e],
+                attn_sink,
+                head_dim_v,
+                softmax_scale,
+                extra_k_cache,
+                None if extra_indices is None else extra_indices[s:e],
+                None if extra_topk_length is None else extra_topk_length[s:e],
+            )
+            outs.append(o)
+            lses.append(l)
+        return torch.cat(outs), torch.cat(lses)
 
     # Process main cache (SWA)
     out, lse = _run_triton_sparse_decode(
