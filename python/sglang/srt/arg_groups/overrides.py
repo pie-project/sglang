@@ -1438,13 +1438,20 @@ def _moe_runner_backend_quant_constraints(view: Any) -> dict:
     # create_moe_runner resolve it to ASCEND.
     if view.quantization == "mxfp8" and not get_platform().is_npu:
         from sglang.srt.server_args import MXFP8_MOE_RUNNER_BACKEND_CHOICES
+        from sglang.srt.utils.common import mxfp8_block_convert_required
 
         is_gfx95_mxfp8 = get_platform().is_hip and is_gfx95_supported()
+        # CUDA below SM100 converts MXFP8 to block-fp8, which the Triton MoE runs.
+        is_cuda_block_mxfp8 = get_platform().is_cuda and mxfp8_block_convert_required()
         allowed = list(MXFP8_MOE_RUNNER_BACKEND_CHOICES)
         # Every other entry is CUDA-only. Honor an explicit triton request on ROCm
         # instead of sending it back to flashinfer_trtllm, whose MoE apply path
         # imports flashinfer.
-        if is_gfx95_mxfp8 or (get_platform().is_hip and moe_runner_backend == "triton"):
+        if (
+            is_gfx95_mxfp8
+            or is_cuda_block_mxfp8
+            or (get_platform().is_hip and moe_runner_backend == "triton")
+        ):
             allowed.append("triton")
         if is_gfx95_mxfp8:
             # the aiter MXFP8 MoE quant info is built only when aiter is enabled
@@ -1454,7 +1461,11 @@ def _moe_runner_backend_quant_constraints(view: Any) -> dict:
         if view.moe_a2a_backend == "flashinfer_megamoe":
             mxfp8_default = "flashinfer_megamoe"
         else:
-            mxfp8_default = "triton" if is_gfx95_mxfp8 else "flashinfer_trtllm"
+            mxfp8_default = (
+                "triton"
+                if is_gfx95_mxfp8 or is_cuda_block_mxfp8
+                else "flashinfer_trtllm"
+            )
 
         if moe_runner_backend == "auto":
             moe_runner_backend = mxfp8_default
