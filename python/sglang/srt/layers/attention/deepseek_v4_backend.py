@@ -184,8 +184,15 @@ def _pad_last_dim(x: T, multiples_of: int = PAGE_INDEX_ALIGNED_SIZE) -> T:
     return F.pad(x, pad=(0, target_size - curr_size), mode="constant", value=-1)
 
 
+def _sm120_flashmla() -> bool:
+    # sm_8x has no FlashMLA sparse kernel either: take the SM120 Triton path there too
+    return get_platform().is_sm120 or (
+        torch.version.cuda is not None and torch.cuda.get_device_capability()[0] < 9
+    )
+
+
 def _create_flashmla_metadata():
-    if get_platform().is_sm120 or _is_xpu:
+    if _sm120_flashmla() or _is_xpu:
         return None
     import sgl_kernel.flash_mla as flash_mla
 
@@ -2561,7 +2568,7 @@ class DeepseekV4AttnBackend(
         return (
             forward_batch.forward_mode.is_extend_without_speculative()
             and not is_cp_active(forward_batch)
-            and not get_platform().is_sm120
+            and not _sm120_flashmla()
             and (
                 num_qo_tokens > _LARGE_INDEXER_QUERY_THRESHOLD
                 or envs.SGLANG_OPT_FLASHMLA_SPARSE_PREFILL.get()
@@ -3781,7 +3788,7 @@ class DeepseekV4AttnBackend(
                     extra_topk_lengths,
                 )
 
-            if get_platform().is_sm120:
+            if _sm120_flashmla():
                 from sglang.kernels.ops.attention.flash_mla_sm120 import (
                     SM120_DECODE_MAX_TOKENS,
                     flash_mla_with_kvcache_sm120,

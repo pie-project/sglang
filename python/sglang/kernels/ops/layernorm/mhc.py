@@ -1182,6 +1182,9 @@ def mhc_pre(
                 hidden_block = 256
             elif hc_hidden_size == 28672:
                 hidden_block = 128
+            elif hc_hidden_size % n_splits_pre == 0 and (hc_hidden_size // n_splits_pre) % 64 == 0:
+                # other widths (DeepSeek-V4.1-Flash's 4 x 5120): the widest block that tiles one split
+                hidden_block = next(b for b in (256, 128, 64) if (hc_hidden_size // n_splits_pre) % b == 0)
             else:
                 raise NotImplementedError(
                     f"mhc_pre splitk kernel only supports hc_hidden_size in {{16384, 28672}}, "

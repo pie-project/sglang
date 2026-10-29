@@ -47,7 +47,7 @@ from sglang.srt.configs.deepseek_v4 import DeepSeekV4Config
 from sglang.srt.distributed.device_communicators.pynccl_allocator import (
     use_symmetric_memory,
 )
-from sglang.srt.environ import envs
+from sglang.srt.environ import _default_pre_hopper_cuda, envs
 from sglang.srt.eplb.expert_distribution import get_global_expert_distribution_recorder
 from sglang.srt.eplb.expert_location import ModelConfigForExpertLocation
 from sglang.srt.hardware_backend.npu.dsv4.dsv4_rope import (
@@ -280,6 +280,8 @@ def wo_a_fp8_gemm_enabled(quant_config: Optional[QuantizationConfig]) -> bool:
         _FP8_WO_A_GEMM
         and isinstance(quant_config, Fp8Config)
         and quant_config.weight_block_size == [128, 128]
+        # DeepGEMM fp8_einsum needs sm_90+
+        and not _default_pre_hopper_cuda()
     )
 
 

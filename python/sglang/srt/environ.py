@@ -25,6 +25,21 @@ def _default_hip() -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def _default_pre_hopper_cuda() -> bool:
+    """CUDA below sm_90: no DeepGEMM / FlashMLA kernels, take the torch / Triton fallbacks."""
+    try:
+        import torch
+
+        return (
+            torch.version.cuda is not None
+            and torch.cuda.is_available()
+            and torch.cuda.get_device_capability()[0] < 9
+        )
+    except Exception:
+        return False
+
+
 _NON_UTF8_PREFIX = "base64:"
 
 
@@ -1135,7 +1150,9 @@ class Envs:
     # for batches whose KV sequence lengths have a large spread.
     SGLANG_TRTLLM_MHA_DECODE_SEQ_LEN_SPLITS = EnvInt(1)
     # SM120 FlashMLA decode backend: "flashinfer" (default), "triton", or "torch".
-    SGLANG_SM120_FLASHMLA_BACKEND = EnvStr("flashinfer")
+    SGLANG_SM120_FLASHMLA_BACKEND = EnvStr(
+        lambda: "triton" if _default_pre_hopper_cuda() else "flashinfer"
+    )
     # Store DeepSeek-V4 SWA KV directly in FlashInfer's 64-token SM120 page
     # layout. The scheduler continues to allocate 256-token logical pages.
     SGLANG_OPT_SM120_DIRECT_SWA_KV = EnvBool(False)
@@ -1629,7 +1646,7 @@ class Envs:
     # Run the DeepSeek-V4.1 ratio-1/2 prefill indexer on the torch path instead
     # of the DeepGEMM dense fp4 logits kernel (test oracle / fallback).
     SGLANG_DSV41_TORCH_PREFILL_INDEXER = EnvBool(False)
-    SGLANG_FP8_PAGED_MQA_LOGITS_TORCH = EnvBool(False)
+    SGLANG_FP8_PAGED_MQA_LOGITS_TORCH = EnvBool(_default_pre_hopper_cuda)
     SGLANG_OPT_FLASHMLA_SPARSE_PREFILL = EnvBool(True)
     # gfx950 DeepSeek-V4.1 prefill: attend with aiter's OPUS sparse kernel over a bf16
     # dequant of the chunk's SWA and compressed history, instead of the decode kernel.

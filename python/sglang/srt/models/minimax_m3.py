@@ -1799,6 +1799,8 @@ class MiniMaxM3SparseForCausalLM(nn.Module):
                 "Shared and routed experts may use different quantization formats "
                 "in ModelOpt mixed-precision checkpoints."
             )
+        if getattr(quant_config, "nvfp4_experts", False):
+            return "Routed experts are NVFP4 while the shared expert is MXFP8."
         if not (_is_cuda or _is_hip):
             return "Shared experts fusion currently requires CUDA or ROCm devices."
         if _is_cuda and (_device_sm is not None) and (_device_sm < 80):
