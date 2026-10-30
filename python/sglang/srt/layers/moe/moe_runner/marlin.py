@@ -129,7 +129,12 @@ def fused_experts_none_to_marlin(
     # PackedTopKOutput -- int32 (expert_id << 16) | bf16-weight-bits -- for the
     # FlashInfer trtllm routed kernel, which unpacks device-side. The Marlin
     # runner reads topk_ids / topk_weights separately, so unpack it here.
-    if not hasattr(topk_output, "topk_weights"):
+    from sglang.srt.layers.moe.topk import TopKOutputChecker
+
+    # a bypassed top-k (the gate routed inside a fused kernel elsewhere) is selected here
+    if TopKOutputChecker.format_is_bypassed(topk_output):
+        topk_output = topk_output.to_standard()
+    elif not hasattr(topk_output, "topk_weights"):
         from sglang.srt.layers.moe.topk import StandardTopKOutput
 
         topk_ids, topk_weights = _fused_unpack_packed_topk(topk_output.packed_topk_ids)
