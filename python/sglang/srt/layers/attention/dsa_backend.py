@@ -702,7 +702,7 @@ class DeepseekSparseAttnBackend(
         else:
             self.device_capability = torch.cuda.get_device_capability()
         self.device_sm_major = self.device_capability[0]
-        if self.device_sm_major < 9 and self.dsa_index_topk != 2048:
+        if (self.device_sm_major < 9 or self.device_sm_major == 12) and self.dsa_index_topk != 2048:
             # The sgl-kernel top-k kernels only take topk=2048.
             self.use_fused_topk = False
             self.dsa_topk_backend = DSATopKBackend.TORCH
@@ -2755,7 +2755,7 @@ class DeepseekSparseAttnBackend(
                 cache_seqlens = cache_seqlens[:num_queries]
                 cu_seqlens_q = cu_seqlens_q[: num_queries + 1]
                 cu_seqlens_k = cu_seqlens_k[: num_queries + 1]
-        if self.device_sm_major < 9 and max_seqlen_q == 1:
+        if (self.device_sm_major < 9 or self.device_sm_major == 12) and max_seqlen_q == 1:
             pos = torch.arange(page_table.shape[1], device=page_table.device)
             indices = page_table.masked_fill(
                 pos[None, :] >= cache_seqlens[: page_table.shape[0], None], -1
@@ -2805,7 +2805,7 @@ class DeepseekSparseAttnBackend(
         topk_length: Optional[torch.Tensor] = None,
         attn_sink: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        if self.device_sm_major < 9:
+        if self.device_sm_major < 9 or self.device_sm_major == 12:
             return _sparse_mla_fwd_pre_sm90(
                 q_all, kv_cache, page_table_1, sm_scale, v_head_dim, attn_sink
             )
