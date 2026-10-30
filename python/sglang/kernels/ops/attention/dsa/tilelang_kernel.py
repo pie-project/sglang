@@ -1372,7 +1372,9 @@ def tilelang_sparse_fwd(
     assert topk % 64 == 0, "topk must be padded to a multiple of 64"
 
     is_fp8_kv = kv.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
-    if _is_hip or is_fp8_kv:
+    # SM120 has 99 KB of shared memory a block: the bf16 v1/v2 kernels want 200+ KB, the split kernels fit
+    sm120 = not _is_hip and torch.cuda.get_device_capability(q.device)[0] == 12
+    if _is_hip or is_fp8_kv or sm120:
         if is_fp8_kv:
             if q.dtype != kv.dtype:
                 q = q.to(kv.dtype)
