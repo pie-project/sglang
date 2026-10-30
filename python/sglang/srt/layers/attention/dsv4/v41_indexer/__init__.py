@@ -41,9 +41,9 @@ __all__ = [
 
 @functools.cache
 def is_sm100_or_newer() -> bool:
-    # DeepGEMM's fp8_fp4 mqa-logits kernels need SM100+; Hopper and non-CUDA devices
-    # take the torch indexer.
-    return is_cuda() and torch.cuda.get_device_capability()[0] >= 10
+    # DeepGEMM's fp8_fp4 mqa-logits kernels need SM100+; Hopper, sm_12x and non-CUDA
+    # devices take the torch indexer.
+    return is_cuda() and 10 <= torch.cuda.get_device_capability()[0] < 12
 
 
 @functools.cache

@@ -1330,7 +1330,16 @@ class DSV4PoolConfigurator(MemoryPoolConfigurator):
         c4_indexer_state_bytes = 2 * 2 * self.indexer_head_dim * c4_state_dtype_size
 
         c4_state_ratio = self.ring_sizes.get(4, 0) / self.page_size
-        return self._get_paged_kv_bytes_per_token() * self.num_layers_total + (
+        # sm_120's FlashInfer sparse decode copies one layer's SWA pool into 64-token
+        # pages (flash_mla_sm120._split_kv_pages_to_64), so it costs one more layer
+        swa_layers = self.num_layers_total + int(
+            torch.version.cuda is not None
+            and torch.cuda.get_device_capability()[0] == 12
+            and self.page_size != 64
+            and envs.SGLANG_SM120_FLASHMLA_BACKEND.get() == "flashinfer"
+            and not envs.SGLANG_OPT_SM120_DIRECT_SWA_KV.get()
+        )
+        return self._get_paged_kv_bytes_per_token() * swa_layers + (
             c4_state_ratio
             * (c4_state_bytes + c4_indexer_state_bytes)
             * self.num_layers(4)
