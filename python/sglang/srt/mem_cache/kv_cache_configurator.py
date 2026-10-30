@@ -3000,6 +3000,9 @@ class KVCacheConfigurator:
         elif (
             get_memory().disable_radix_cache
             and get_schedule().max_running_requests is not None
+            # a state slot for every running request must fit the mamba budget; else size it by ratio
+            and stage_per_req * (get_schedule().max_running_requests // self.attn_dp_size + 1)
+            < total_rest_memory * (1 << 30) * get_schedule().mamba_full_memory_ratio / (1 + get_schedule().mamba_full_memory_ratio)
         ):
             # Use explicitly set max_running_requests when radix cache is disabled
             get_context().override(
