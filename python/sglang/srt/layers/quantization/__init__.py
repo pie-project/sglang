@@ -5,6 +5,10 @@ from __future__ import annotations
 
 from typing import Dict, Type
 
+from sglang.srt.layers.quantization.sm80_fp8 import patch_triton_fp8e4nv
+
+patch_triton_fp8e4nv()  # Triton e4m3 below sm_89 (DeepSeek-V4.1's fp8 cache kernels)
+
 from sglang.srt.layers.quantization.auto_round import AutoRoundConfig
 from sglang.srt.layers.quantization.awq import (
     AWQConfig,
