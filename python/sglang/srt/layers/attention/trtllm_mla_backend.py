@@ -1034,7 +1034,9 @@ class TRTLLMMLABackend(FlashInferMLAAttnBackend):
             seq_lens if seq_lens.dtype == torch.int32 else seq_lens.to(torch.int32)
         )
         extra_kwargs = {"backend": self.backend} if self.backend != "trtllm-gen" else {}
-        if self.backend == "trtllm-gen":
+        # trtllm-gen MLA decode takes no 64 < heads < 128 (FlashInfer runs cute-dsl,
+        # which refuses the counter buffer)
+        if self.backend == "trtllm-gen" and not 64 < query.shape[-2] < 128:
             extra_kwargs["multi_ctas_kv_counter_buffer"] = (
                 self._multi_ctas_kv_counter_buffer
             )
