@@ -647,12 +647,10 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
                 prepare_moe_mxfp4_layer_for_marlin,
             )
 
-            if (
-                not get_platform().is_sm90
-                and not get_platform().is_sm100
-                and not get_platform().is_sm120
-            ):
-                raise RuntimeError("MXFP4 Marlin requires SM90+.")
+            if get_platform().is_cuda and get_platform().device_capability < (8, 0):
+                # Ampere runs the W4A16 Marlin MoE too (vLLM's pick there); triton_kernels'
+                # sm_80 path prefills gpt-oss at ~600 tok/s on an A100
+                raise RuntimeError("MXFP4 Marlin requires SM80+.")
             if not check_moe_marlin_supports_layer(layer, 32, allow_tile_padding=True):
                 raise RuntimeError(
                     "Current MXFP4 MoE layer is not supported by Marlin."
