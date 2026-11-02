@@ -1228,6 +1228,11 @@ class Fp8LinearMethod(LinearMethodBase):
         if self.use_marlin:
             if self.block_quant:
                 layer.weight_block_size = self.quant_config.weight_block_size
+                if layer.weight_block_size[1] % 128:
+                    # FP8 Marlin takes 128-wide groups or channels only (DeepSeek-V4.1's 32x32
+                    # blocks fail "Invalid thread config"): serve the dequantized weight in bf16
+                    _dequant_fp8_block_to_bf16(layer)
+                    return
             prepare_fp8_layer_for_marlin(layer, not self.block_quant)
             # Activations not quantized for marlin.
             del layer.input_scale
@@ -1238,6 +1243,8 @@ class Fp8LinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if getattr(layer, "fp8_bf16_fallback", False):
+            return F.linear(x, layer.weight, bias)
         if self.use_marlin:
             return torch.ops.sglang.apply_fp8_marlin_linear(
                 input=x,
@@ -3393,3 +3400,17 @@ class Fp8KVCacheMethod(BaseKVCacheMethod):
 
     def __init__(self, quant_config: Fp8Config):
         super().__init__(quant_config)
+
+
+def _dequant_fp8_block_to_bf16(layer: Module) -> None:
+    w = layer.weight.data
+    s = layer.weight_scale_inv.data
+    s = torch.exp2(s.float() - 127) if s.dtype == torch.uint8 else s.float()  # raw UE8M0 bytes
+    bn, bk = layer.weight_block_size
+    n, k = w.shape
+    s = s.repeat_interleave(bn, 0)[:n].repeat_interleave(bk, 1)[:, :k]
+    layer.weight = Parameter((w.float() * s).to(layer.orig_dtype), requires_grad=False)
+    del layer.weight_scale_inv
+    if hasattr(layer, "input_scale"):
+        del layer.input_scale
+    layer.fp8_bf16_fallback = True
