@@ -776,6 +776,10 @@ def _flash_attn_fwd(
     elif tile_mn is None:
         if arch // 10 == 8:
             fwd_cfg = FwdConfig(128, 64, True, True)  # SM80, should tune
+            if arch != 80 and max(head_dim, head_dim_v) > 128:
+                # sm_86/sm_89 give a block 99 KB of shared memory (sm_80: 163 KB): Q's 128 rows and K/V's 64 of a
+                # 256-wide head take 128 KB and the launch fails (CUDA_LAUNCH_INVALID_CONFIG)
+                fwd_cfg = FwdConfig(64, 64, True, True)
         elif arch // 10 == 9:
             sparse_q = get_sparse_q_block_size(block_sparse_tensors, seqlen_q)
             sparse_block_size_kv = (
