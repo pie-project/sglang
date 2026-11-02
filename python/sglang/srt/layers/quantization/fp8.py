@@ -1225,6 +1225,30 @@ class Fp8LinearMethod(LinearMethodBase):
                 _amx_process_weight_after_loading(layer, ["weight"])
                 return
 
+        if (
+            self.use_marlin
+            and self.block_quant
+            and not self.use_mxfp8
+            and self.quant_config.weight_block_size is not None
+            and self.quant_config.weight_block_size[1] != 128
+            and layer.weight.dtype == torch.float8_e4m3fn
+        ):
+            # Marlin's FP8 kernels take K groups of 128 or per channel only
+            # (DeepSeek-V4.1 ships 32x32 blocks): hold the weight as its exact
+            # BF16 expansion and run a plain GEMM.
+            from sglang.srt.layers.quantization.fp8_utils import block_quant_dequant
+
+            layer.weight = Parameter(
+                block_quant_dequant(
+                    layer.weight.data,
+                    layer.weight_scale_inv.data.float(),
+                    self.quant_config.weight_block_size,
+                    torch.bfloat16,
+                ),
+                requires_grad=False,
+            )
+            layer.marlin_bf16_fallback = True
+            return
         if self.use_marlin:
             if self.block_quant:
                 layer.weight_block_size = self.quant_config.weight_block_size
@@ -1238,6 +1262,8 @@ class Fp8LinearMethod(LinearMethodBase):
         x: torch.Tensor,
         bias: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        if getattr(layer, "marlin_bf16_fallback", False):
+            return F.linear(x[0] if isinstance(x, tuple) else x, layer.weight, bias)
         if self.use_marlin:
             return torch.ops.sglang.apply_fp8_marlin_linear(
                 input=x,
