@@ -702,7 +702,7 @@ class DeepseekSparseAttnBackend(
         else:
             self.device_capability = torch.cuda.get_device_capability()
         self.device_sm_major = self.device_capability[0]
-        if (self.device_sm_major < 9 or self.device_sm_major == 12) and self.dsa_index_topk != 2048:
+        if (self.device_sm_major < 10 or self.device_sm_major == 12) and self.dsa_index_topk != 2048:
             # The sgl-kernel top-k kernels only take topk=2048.
             self.use_fused_topk = False
             self.dsa_topk_backend = DSATopKBackend.TORCH
@@ -2842,6 +2842,10 @@ class DeepseekSparseAttnBackend(
                 self._sink_pad_cache[key] = sink_input
             sink_input[:num_heads].copy_(attn_sink)
 
+        if page_table_1.shape[-1] % 128:  # FlashMLA wants topk % 128 == 0; -1 is skipped
+            page_table_1 = torch.nn.functional.pad(
+                page_table_1, (0, -page_table_1.shape[-1] % 128), value=-1
+            )
         # indices shape must be (s_q, h_kv=1, topk), keep h_kv=1 unchanged
         indices_input = page_table_1.unsqueeze(1)
 
