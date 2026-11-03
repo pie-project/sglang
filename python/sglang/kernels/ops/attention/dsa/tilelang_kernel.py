@@ -1554,6 +1554,22 @@ def tilelang_fp8_paged_mqa_logits(
 
     logits = page_table.new_empty((batch_size, max_seq_len), dtype=torch.float32)
 
+    if torch.cuda.get_device_capability(q_fp8.device) < (8, 9):
+        # the kernel's fp8 x fp8 gemm is the sm_89 MMA, which asserts below it (A100):
+        # the same sum over bf16 copies of the pages
+        num_pages = -(-max_seq_len // block_size)
+        rows = kvcache_fp8.view(torch.uint8).view(-1, block_size * (head_dim + 4))
+        blk = rows[page_table[:, :num_pages].long().clamp_(min=0)]
+        k = blk[..., : block_size * head_dim].reshape(batch_size, num_pages * block_size, head_dim)
+        k = k.view(torch.float8_e4m3fn).to(torch.bfloat16)
+        k_s = blk[..., block_size * head_dim :].contiguous().view(torch.float32)
+        k_s = k_s.reshape(batch_size, num_pages * block_size)
+        q = q_fp8.view(batch_size, num_heads, head_dim).to(torch.bfloat16)
+        s = torch.bmm(k, q.transpose(1, 2)).float().relu_()
+        out = (s * weight.float()[:, None, :]).sum(-1) * k_s
+        logits.copy_(out[:, :max_seq_len])
+        return logits
+
     NUM_CU = 256
     split_kv = split_kv = max(1, min(max_seq_len // block_size, NUM_CU // batch_size))
     kernel = fp8_paged_mqa_logits_kernel(
