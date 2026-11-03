@@ -1567,7 +1567,8 @@ def tilelang_fp8_paged_mqa_logits(
         q = q_fp8.view(batch_size, num_heads, head_dim).to(torch.bfloat16)
         s = torch.bmm(k, q.transpose(1, 2)).float().relu_()
         out = (s * weight.float()[:, None, :]).sum(-1) * k_s
-        logits.copy_(out[:, :max_seq_len])
+        n = min(out.shape[1], max_seq_len)
+        logits[:, :n].copy_(out[:, :n])
         return logits
 
     NUM_CU = 256
