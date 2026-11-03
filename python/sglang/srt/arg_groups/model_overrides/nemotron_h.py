@@ -97,6 +97,10 @@ def _nemotron_h_overrides(server_args: Any, hf_config: Any) -> dict:
                 "Use marlin as MoE runner backend on SM80-SM90 for "
                 f"{model_arch} {model_config.quantization}"
             )
+        elif get_platform().is_cuda and get_platform().device_capability < (8, 9):
+            # FlashInfer's CUTLASS fused MoE has no sm_80/sm_86 build
+            # ("Invalid backend: 80"): keep auto, the Triton runner
+            pass
         else:
             overrides["moe_runner_backend"] = "flashinfer_cutlass"
 
