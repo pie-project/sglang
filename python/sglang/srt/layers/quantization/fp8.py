@@ -786,6 +786,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 )
                 layer.weight._ptpc_scale = row_scale
             layer.weight_scale_inv = Parameter(scale, requires_grad=False)
+            layer.mxfp8_block_converted = True
             self.use_mxfp8 = False
             self.convert_mxfp8_to_block = False
             self.weight_block_size = [128, 128]
@@ -1228,6 +1229,9 @@ class Fp8LinearMethod(LinearMethodBase):
         if self.use_marlin:
             if self.block_quant:
                 layer.weight_block_size = self.quant_config.weight_block_size
+                if getattr(layer, "mxfp8_block_converted", False):
+                    # MXFP8 weights converted to [128, 128] blocks at load (below SM100)
+                    layer.weight_block_size = [128, 128]
                 if layer.weight_block_size[1] % 128:
                     # FP8 Marlin takes 128-wide groups or channels only (DeepSeek-V4.1's 32x32
                     # blocks fail "Invalid thread config"): serve the dequantized weight in bf16
