@@ -1071,6 +1071,9 @@ class Mxfp4MoEMethod(FusedMoEMethodBase):
             self.w2_weight_triton_tensor = w2_weight
             del layer.w13_weight
             del layer.w2_weight
+            # each layer's swizzle temporaries stay cached and fragment the pool: gpt-oss-120b on an 80 GB
+            # Hopper card then finds no 1 GiB block for the next layer (7.5 GiB reserved but unallocated)
+            torch.cuda.empty_cache()
         elif _is_cpu and _is_cpu_amx_available:
             _amx_process_weight_after_loading(layer, ["w13_weight", "w2_weight"])
             if use_intel_amx_backend(layer):
