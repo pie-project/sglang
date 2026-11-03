@@ -261,6 +261,14 @@ class _FusedQKVIndexProj(nn.Module):
                 # block-fp8 state). q/kv and index output sizes are 128-aligned, so
                 # converting the concatenation equals converting each proj alone.
                 quant_method.process_weights_after_loading_block_quant(self)
+                if getattr(quant_method, "use_marlin", False):
+                    # Ampere: FP8 Marlin (bf16 activations) over the [128,128] blocks
+                    from sglang.srt.layers.quantization.marlin_utils_fp8 import (
+                        prepare_fp8_layer_for_marlin,
+                    )
+
+                    self.weight_block_size = [128, 128]
+                    prepare_fp8_layer_for_marlin(self, False)
             else:
                 # Derive the backend scale layout for the native MXFP8 GEMM.
                 quant_method._process_mxfp8_linear_weight_scale(self)

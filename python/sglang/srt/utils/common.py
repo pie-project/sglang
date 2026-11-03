@@ -4743,11 +4743,11 @@ def mxfp8_block_convert_required():
     returns False there).
     """
     if not torch.version.hip:
-        # CUDA below SM100 (Ada, Hopper) has no MXFP8 GEMM either; take the same
-        # block-fp8 path, whose Triton kernels run there.
+        # CUDA below SM100 (Ampere, Ada, Hopper) has no MXFP8 GEMM either; take the same
+        # block-fp8 path, whose Triton kernels run there (Ampere: FP8 Marlin, bf16 activations).
         if torch.cuda.is_available():
             major, minor = torch.cuda.get_device_capability()
-            return 89 <= major * 10 + minor < 100
+            return 80 <= major * 10 + minor < 100
         return False
     return is_gfx942_supported() and not is_gfx95_supported()
 
