@@ -290,6 +290,10 @@ class ReLU2(BaseFusedOp):
     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
         return relu2(x)
 
+    def forward_hip(self, x: torch.Tensor) -> torch.Tensor:
+        # the relu2 kernel is CUDA's JIT, imported only there (Nemotron-3 on MI300X: "name 'relu2' is not defined")
+        return self.forward_native(x)
+
 
 class QuickGELU(BaseFusedOp):
     def forward_native(self, x: torch.Tensor) -> torch.Tensor:
