@@ -37,7 +37,7 @@ from sglang.srt.runtime_context import (
     max_prefill_buffer_tokens,
     max_speculative_num_draft_tokens,
 )
-from sglang.srt.utils import empty_context, log_info_on_rank0
+from sglang.srt.utils import empty_context, is_hip, log_info_on_rank0
 from sglang.srt.utils.common import get_eager_max_batch_size
 
 if TYPE_CHECKING:
@@ -61,7 +61,8 @@ def should_run_flashinfer_autotune(
 ) -> bool:
     """Check if flashinfer autotune should be run."""
     mr = model_runner
-    if mr.device != "cuda":
+    # ROCm reports device "cuda" too, and has no flashinfer to tune (Nemotron-3 on MI300X died importing it)
+    if mr.device != "cuda" or is_hip():
         return False
     if get_exec().kernel.disable_flashinfer_autotune:
         return False

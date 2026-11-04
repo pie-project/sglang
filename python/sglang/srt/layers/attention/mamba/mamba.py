@@ -35,6 +35,7 @@ from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils import (
     is_cpu,
     is_cuda,
+    is_hip,
     is_npu,
     is_xpu,
     set_weight_attrs,
@@ -58,8 +59,8 @@ elif is_npu():
     from sgl_kernel_npu.mamba.causal_conv1d import (
         causal_conv1d_update_npu as causal_conv1d_update,
     )
-elif is_xpu():
-    # XPU has no native causal_conv1d kernel yet; use the portable Triton
+elif is_xpu() or is_hip():
+    # XPU (and ROCm, whose is_cuda() is False) has no native causal_conv1d kernel yet; use the portable Triton
     # implementation for both the "native" and the "_triton" entry points so
     # `causal_conv1d_fn` / `causal_conv1d_fn_triton` are always bound on XPU.
     from sglang.kernels.ops.mamba.causal_conv1d_triton import (
